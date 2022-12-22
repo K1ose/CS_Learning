@@ -239,10 +239,561 @@ task_struct 的 state 域描述了进程的当前状态，它必然是五种状�
 
 可以看到，在 `task_struct` 结构体中，包含了一个指向其父进程 `task_struct` 结构体地址的指针 `parent` ，还包含一个指向其子进程 `task_struct` 结构体的链表指针 `children` 。
 
-TODO
+由此，对于当前进程的 `task_struct current` ，可以用以下方式访问到 `parent` 和 `children` 。
+
+```c
+/* 访问父进程的 task_struct */
+struct task_struct *my_parent = current->parent;
+
+/* 遍历访问子进程的 task_struct */
+struct task_struct *task;
+struct list_head *list;
+
+list_for_each(list, &current->children){
+    task = list_entry(list, struct task_struct, sibling);
+}
+/*
+ * 相当于
+ * for (list = (current->children)->next; prefetch(list->next), list != (current->children);list = list->next) 
+ 	task = list_entry(list, struct task_struct, sibling);
+*/
+```
+
+`list_head` 和 `list_for_each` 等与链表相关的结构体和函数在 `include/linux/list.h` 中定义。
+
+```c
+// include/linux/list.h
+/*
+ * Simple doubly linked list implementation.
+ *
+ * Some of the internal functions ("__xxx") are useful when
+ * manipulating whole lists rather than single entries, as
+ * sometimes we already know the next/prev entries and we can
+ * generate better code by using them directly rather than
+ * using the generic single-entry routines.
+ */
+
+struct list_head {
+	struct list_head *next, *prev;
+};
+
+#define LIST_HEAD_INIT(name) { &(name), &(name) }
+
+#define LIST_HEAD(name) \
+	struct list_head name = LIST_HEAD_INIT(name)
+
+static inline void INIT_LIST_HEAD(struct list_head *list)
+{
+	list->next = list;
+	list->prev = list;
+}
+
+/* ... */
+
+/**
+ * list_for_each	-	iterate over a list
+ * @pos:	the &struct list_head to use as a loop cursor.
+ * @head:	the head for your list.
+ */
+#define list_for_each(pos, head) \
+	for (pos = (head)->next; prefetch(pos->next), pos != (head); \
+        	pos = pos->next)
+
+/* ... */
+
+/**
+ * list_entry - get the struct for this entry
+ * @ptr:	the &struct list_head pointer.
+ * @type:	the type of the struct this is embedded in.
+ * @member:	the name of the list_struct within the struct.
+ */
+
+#define list_entry(ptr, type, member) \
+	container_of(ptr, type, member)
+
+/**
+ * container_of(ptr, type, member) 在 include/linux/kernel.h 中定义
+ * container_of - cast a member of a structure out to the containing structure
+ * @ptr:	the pointer to the member.
+ * @type:	the type of the container struct this is embedded in.
+ * @member:	the name of the member within the struct.
+ *
+ */
+```
+
+ `sibling` 是 `task_struct` 结构体的成员，是一个存储了该进程的兄弟进程的链表：
+
+```
+struct list_head sibling;	/* linkage in my parent's children list */
+```
+
+关于 `prefetch(const void *, ...)` ：
+
+![](./Linux-kernel-development-03-process-management/figure01.png)
+
+`init` 进程的进程描述符是作为 `init_task` 静态分配的。所以，与其纠结先有鸡还是先有蛋，不如直接让女娲造人。下面的代码可以很好地演示所有进程间的关系。
+
+```c
+struct task_struct *task;
+for (task = current; task != &init_task; task = task->parent)
+	;
+```
+
+在执行完上述代码后，最终 `task` 会指向 `init` 的 `task_struct` 。
+
+对于给定的进程 `task_struct` 指针 `task` ，获得其下一个进程的指针：
+
+```c
+list_entry(task->task.next, struct task_struct, task);
+```
+
+在内核中有封装好的 `next_task(task)` 宏，完成了上述的功能。
+
+```c
+
+#define next_task(p) \
+	list_entry_rcu((p)->tasks.next, struct task_struct, tasks)
+```
+
+获得其上一个进程的指针：
+
+```c
+list_entry(task->task.prev, struct task_struct, task);
+```
+
+在内核中有封装好的 `prev_task(task)` 宏，完成了上述的功能。
+
+如果想要遍历任务列表的话，使用 `for_each_process(task)` 是很好的选择：
+
+```c
+struct task_struct *task;
+
+for_each_process(task){
+	printk("%s[%d]\n", task->comm, task->pid);	// 打印任务名称
+}
+
+/* #define for_each_process(p) \
+ *	for (p = &init_task ; (p = next_task(p)) != &init_task ; )
+ */
+```
 
 ## 进程创建
 
+许多操作系统在创建进程时，提供的是 spawn 机制：首先在新的地址空间里创建进程，读入可执行文件，最后开始执行。
+
+Unix 将上述的步骤分解到了两个独立的函数中执行： `fork()` 和 `exec()` 。
+
+- `fork()` 通过拷贝当前进程创建一个子进程。此时，子进程和父进程的区别仅仅在于 `PID` 、 `PPID` 以及某些资源和统计量。
+- `exec()` 读取可执行文件并将其载入地址空间，开始运行。
+
+### 写时拷贝
+
+传统的 fork() 系统调用直接把<u>所有的资源</u>复制给新创建的进程，这样会存在一些弊端：
+
+- 拷贝的数据不一定会被共享给子进程；
+- 如果新进程打算立即执行一个新的映像，所有的拷贝将被丢弃；
+
+Linux的 fork() 系统调用使用<u>写时拷贝(copy-on-write)</u>页实现，它可以推迟甚至免除拷贝数据的技术，在不复制整个进程地址空间下，让父子进程共享同一个拷贝。
+
+该技术的主要思想是：只有需要写入时，数据才会被复制，对应的页才会被拷贝，这之后各个进程将拥有各自的拷贝。而在这之前，只是<u>以只读方式共享</u>。
+
+copy-on-write 是一个很好的优化技术。但是在作者写这本书时，脏牛漏洞(dirty cow)还没有被发现，所以我们同时也要注意到这些技术的缺陷。
+
+### fork()
+
+Linux通过 `clone()` 系统调用来实现 `fork()` ，需要指明一系列的参数（父子进程、需要共享的资源）。大致流程是： 
+
+- `fork()`, `vfork()` 和 `__clone()` 根据各自需要的参数标志去调用 `clone()` ；
+
+  - 当执行 `fork()`, `vfork()` 系统调用后，程序陷入内核，调用：
+
+    ```c
+    PTREGSCALL0(fork)
+    PTREGSCALL0(vfork)
+    ```
+
+  - 关于 `PTREGSCALL0()` ：将 `esp+4` 的值保存到 `eax` 寄存器，然后跳转到 `sys_fork()` 或 `sys_vfork()` 。
+
+    ```c
+    /* 
+     * System calls that need a pt_regs pointer.
+     */
+    #define PTREGSCALL0(name) \
+    	ALIGN; \
+    ptregs_##name: \
+    	leal 4(%esp),%eax; \
+    	jmp sys_##name;
+    ```
+
+  - 下面以 `sys_fork()` 为例：
+
+    ```c
+    int sys_fork(struct pt_regs *regs)
+    {
+    	return do_fork(SIGCHLD, regs->sp, regs, 0, NULL, NULL);
+    }
+    ```
+
+    
+
+- `clone()` 调用 `do_fork()` 。
+
+  ```
+  
+  ```
+
+  
+
+- `do_fork()` 在 `kernel/fork.c` 中定义，它完成了创建进程的大部分工作。
+
+  ```c
+  /*
+   *  Ok, this is the main fork-routine.
+   *
+   * It copies the process, and if successful kick-starts
+   * it and waits for it to finish using the VM if required.
+   */
+  long do_fork(unsigned long clone_flags,
+  	      unsigned long stack_start,
+  	      struct pt_regs *regs,
+  	      unsigned long stack_size,
+  	      int __user *parent_tidptr,
+  	      int __user *child_tidptr)
+  {
+  	struct task_struct *p;
+  	int trace = 0;
+  	long nr;
+  
+  	/*
+  	 * Do some preliminary argument and permissions checking before we
+  	 * actually start allocating stuff
+  	 */
+  	if (clone_flags & CLONE_NEWUSER) {
+  		if (clone_flags & CLONE_THREAD)
+  			return -EINVAL;
+  		/* hopefully this check will go away when userns support is
+  		 * complete
+  		 */
+  		if (!capable(CAP_SYS_ADMIN) || !capable(CAP_SETUID) ||
+  				!capable(CAP_SETGID))
+  			return -EPERM;
+  	}
+  
+  	/*
+  	 * We hope to recycle these flags after 2.6.26
+  	 */
+  	if (unlikely(clone_flags & CLONE_STOPPED)) {
+  		static int __read_mostly count = 100;
+  
+  		if (count > 0 && printk_ratelimit()) {
+  			char comm[TASK_COMM_LEN];
+  
+  			count--;
+  			printk(KERN_INFO "fork(): process `%s' used deprecated "
+  					"clone flags 0x%lx\n",
+  				get_task_comm(comm, current),
+  				clone_flags & CLONE_STOPPED);
+  		}
+  	}
+  
+  	/*
+  	 * When called from kernel_thread, don't do user tracing stuff.
+  	 */
+  	if (likely(user_mode(regs)))
+  		trace = tracehook_prepare_clone(clone_flags);
+  
+  	p = copy_process(clone_flags, stack_start, regs, stack_size,
+  			 child_tidptr, NULL, trace);
+  	/*
+  	 * Do this prior waking up the new thread - the thread pointer
+  	 * might get invalid after that point, if the thread exits quickly.
+  	 */
+  	if (!IS_ERR(p)) {
+  		struct completion vfork;
+  
+  		trace_sched_process_fork(current, p);
+  
+  		nr = task_pid_vnr(p);
+  
+  		if (clone_flags & CLONE_PARENT_SETTID)
+  			put_user(nr, parent_tidptr);
+  
+  		if (clone_flags & CLONE_VFORK) {
+  			p->vfork_done = &vfork;
+  			init_completion(&vfork);
+  		}
+  
+  		audit_finish_fork(p);
+  		tracehook_report_clone(regs, clone_flags, nr, p);
+  
+  		/*
+  		 * We set PF_STARTING at creation in case tracing wants to
+  		 * use this to distinguish a fully live task from one that
+  		 * hasn't gotten to tracehook_report_clone() yet.  Now we
+  		 * clear it and set the child going.
+  		 */
+  		p->flags &= ~PF_STARTING;
+  
+  		if (unlikely(clone_flags & CLONE_STOPPED)) {
+  			/*
+  			 * We'll start up with an immediate SIGSTOP.
+  			 */
+  			sigaddset(&p->pending.signal, SIGSTOP);
+  			set_tsk_thread_flag(p, TIF_SIGPENDING);
+  			__set_task_state(p, TASK_STOPPED);
+  		} else {
+  			wake_up_new_task(p, clone_flags);
+  		}
+  
+  		tracehook_report_clone_complete(trace, regs,
+  						clone_flags, nr, p);
+  
+  		if (clone_flags & CLONE_VFORK) {
+  			freezer_do_not_count();
+  			wait_for_completion(&vfork);
+  			freezer_count();
+  			tracehook_report_vfork_done(p, nr);
+  		}
+  	} else {
+  		nr = PTR_ERR(p);
+  	}
+  	return nr;
+  }
+  ```
+
+  其中，`do_fork()` 调用了 `copy_process()` 函数。
+
+- `copy_process()` 主要完成的工作有：
+
+  - 调用 `dup_task_struct()` 为新进程创建一个内核栈、 thread_info 结构和 task_struct ，这些值与当前进程相同。此时，父子进程的描述符是完全相同的。
+
+    ```c
+    /* This creates a new process as a copy of the old one, but does not actually start it yet. 
+    It copies the registers, and all the appropriate parts of the process environment (as per the clone flags). The actual kick-off is left to the caller.*/
+    p = dup_task_struct(current);	
+    
+    /* Allocate a return stack for newly created task */
+    ftrace_graph_init_task(p);	
+    
+    ```
+
+  - 调用 `copy_creds()` 为新进程复制进程凭据，即credential。
+
+  - 检查并确保在创建新的子进程后，当前用户所拥有的进程数目没有超出分配的资源上限。
+
+    ```c
+    	if (nr_threads >= max_threads)
+    		goto bad_fork_cleanup_count;
+    ```
+
+  - 在确保新进程能够合法创建后，子进程着手使自己与父进程区分开来。其 `task_struct` 内一些成员需要初始化，但大多数数据都未被修改。
+
+  - 而后，子进程的状态被设置为 `TASK_UNINTERRUPTIBLE` ，以保证该进程不会投入运行。
+
+  - 调用 `copy_flags()` 来更新 `task_struct` 的成员 `flags` ，表明进程是否拥有超级用户权限的 `PF_SUPERPRIV` 标志被清零，表明进程还没有调用 `exec()` 函数的 `PF_FORKNOEXEC` 标志被设置，表明进程准备被创建的`PF_STARTING` 标志被设置。
+
+    ```c
+    static void copy_flags(unsigned long clone_flags, struct task_struct *p)
+    {
+    	unsigned long new_flags = p->flags;
+    
+    	new_flags &= ~PF_SUPERPRIV;
+    	new_flags |= PF_FORKNOEXEC;
+    	new_flags |= PF_STARTING;
+    	p->flags = new_flags;
+    	clear_freeze_flag(p);
+    }
+    ```
+
+  - 在进行许多检查合法性措施后，调用 `alloc_pid()` 为新进程分配一个有效的 `PID` 。
+
+    ```c
+    pid = alloc_pid(p->nsproxy->pid_ns);
+    ```
+
+  - 根据传递给 `clone()` 的参数标志 `clone_flags` ，`copy_progress()` 拷贝或共享打开的文件、文件系统信息、信号处理函数、进程地址空间和命名空间等。一般情况下，这些资源会被给定进程的所有线程共享。否则，这些资源对每个进程是不同的，因而被拷贝到这里。
+
+  - 最后，`copy_progress()` 做扫尾工作，并返回一个指向子进程的指针。
+
+    ```c
+    	total_forks++;
+    	spin_unlock(&current->sighand->siglock);
+    	write_unlock_irq(&tasklist_lock);
+    	proc_fork_connector(p);
+    	cgroup_post_fork(p);
+    	perf_event_fork(p);
+    	return p;
+    ```
+
+- 回到 `do_fork()` 后，如果 `copy_process()` 返回成功，新创建的子进程会被唤醒并投入运行，并且内核有意选择子进程首先执行，因为如果父进程首先执行的话，可能会开始向地址空间进行写操作，而子进程一般会马上调用`exec()` ，这样可以避免 copy-on-write 带来的开销。但子进程并非总能被首先执行。
+
+### vfork()
+
+除了不拷贝父进程的页表向外，`vfork()` 和 `fork()` 的功能相同。子进程作为父进程的一个单独线程在它的地址空间里运行，父进程被阻塞时，直到子进程退出或执行 `exec()` 。子进程不能向不能先地址空间中写入。
+
+理想情况下，不要使用 `vfork()` 。
+
 ## 线程实现
 
+线程机制提供了在<u>同一程序</u>内<u>共享内存地址空间</u>运行的<u>一组线程</u>，它们支持并发程序设计技术(concurrent programming) ，在多处理器系统上也能保持真正的并行处理(parallelism)。
+
+Linux的内核不知道线程的存在，线程仅仅被视为一个<u>与其他进程共享某些资源的进程</u>，它们拥有自己唯一的 `task_struct` 。而诸如 Microsoft Windows 和或是 Sun Solaris 这类冲动做系统，在内核中专门支持线程的机制（通常把这类线程称作轻量级进程(lightweight processes)）。
+
+### 创建线程
+
+Linux内核对线程的视角就注定了内核在创建线程时与创建进程的过程大同小异。只不过在调用 `clone()` 的时候需要传递一些<u>参数标志</u>来指明需要共享的资源。
+
+在 `include/linux/sched.h` 中，定义了 `clone()` 的参数标志。
+
+```c
+/*
+ * cloning flags:
+ */
+#define CSIGNAL		0x000000ff	/* signal mask to be sent at exit */
+#define CLONE_VM	0x00000100	/* set if VM shared between processes */
+#define CLONE_FS	0x00000200	/* set if fs info shared between processes */
+#define CLONE_FILES	0x00000400	/* set if open files shared between processes */
+#define CLONE_SIGHAND	0x00000800	/* set if signal handlers and blocked signals shared */
+#define CLONE_PTRACE	0x00002000	/* set if we want to let tracing continue on the child too */
+#define CLONE_VFORK	0x00004000	/* set if the parent wants the child to wake it up on mm_release */
+#define CLONE_PARENT	0x00008000	/* set if we want to have the same parent as the cloner */
+#define CLONE_THREAD	0x00010000	/* Same thread group? */
+#define CLONE_NEWNS	0x00020000	/* New namespace group? */
+#define CLONE_SYSVSEM	0x00040000	/* share system V SEM_UNDO semantics */
+#define CLONE_SETTLS	0x00080000	/* create a new TLS for the child */
+#define CLONE_PARENT_SETTID	0x00100000	/* set the TID in the parent */
+#define CLONE_CHILD_CLEARTID	0x00200000	/* clear the TID in the child */
+#define CLONE_DETACHED		0x00400000	/* Unused, ignored */
+#define CLONE_UNTRACED		0x00800000	/* set if the tracing process can't force CLONE_PTRACE on this clone */
+#define CLONE_CHILD_SETTID	0x01000000	/* set the TID in the child */
+#define CLONE_STOPPED		0x02000000	/* Start in stopped state */
+#define CLONE_NEWUTS		0x04000000	/* New utsname group? */
+#define CLONE_NEWIPC		0x08000000	/* New ipcs */
+#define CLONE_NEWUSER		0x10000000	/* New user namespace */
+#define CLONE_NEWPID		0x20000000	/* New pid namespace */
+#define CLONE_NEWNET		0x40000000	/* New network namespace */
+#define CLONE_IO		0x80000000	/* Clone io context */
+```
+
+对于 `fork()` 而言，如下代码产生的结果相似，只是父子进程共向地址空间、文件系统资源、文件描述符和信号处理程序。换而言之，子进程和它的父进程就是所谓的线程。
+
+```c
+clone(CLONE_VM | CLONE_FS | CLONE_FILES | CLONE_SIGHAND, 0);
+```
+
+而对于 `vfork()` 而言，实现相似结果的是：
+
+```
+clone(CLONE_VFORK | CLONE_VM | SIGCHLD, 0);
+```
+
+### 内核线程
+
+内核经常需要在后台执行操作，这类型的任务可以通过内核线程(kernel thread)完成。它们是独立运行在内和空间的标准进程，它们没有独立的地址空间，即指向地址空间的 `mm` 指针被设置为 `NULL` 。除了它们无法到用户空间去之外，和普通进程一样。
+
+内核线程只能由其他内核线程创建。内核通过 `kthread` 内核进程来衍生出所有新的内核线程，其接口在 `kernel/kthread.c` 中有定义。
+
+```c
+/**
+ * kthread_create - create a kthread.
+ * @threadfn: the function to run until signal_pending(current).
+ * @data: data ptr for @threadfn.
+ * @namefmt: printf-style name for the thread.
+ *
+ * Description: This helper function creates and names a kernel
+ * thread.  The thread will be stopped: use wake_up_process() to start
+ * it.  See also kthread_run().
+ *
+ * When woken, the thread will run @threadfn() with @data as its
+ * argument. @threadfn() can either call do_exit() directly if it is a
+ * standalone thread for which noone will call kthread_stop(), or
+ * return when 'kthread_should_stop()' is true (which means
+ * kthread_stop() has been called).  The return value should be zero
+ * or a negative error number; it will be passed to kthread_stop().
+ *
+ * Returns a task_struct or ERR_PTR(-ENOMEM).
+ */
+struct task_struct *kthread_create(int (*threadfn)(void *data),
+				   void *data,
+				   const char namefmt[],
+				   ...)
+```
+
+新的任务是由 `kthread` 内核进程通过 `clone()` 系统调用来创建的。通过注释可以知道，新进程将运行 `threadfn` 函数，传递的参数是 `data` ，进程被命名为 `namefmt` 。
+
+新进程出于不可运行状态，如果不调用 `wake_up_process()` 去唤醒，那么它不会主动运行。可以直接通过 `kthread_run()` 来创建并运行进程，它只是简单调用了 `kthread_create()` 和 `wake_up_process()` 。
+
+```c
+/**
+ * kthread_run - create and wake a thread.
+ * @threadfn: the function to run until signal_pending(current).
+ * @data: data ptr for @threadfn.
+ * @namefmt: printf-style name for the thread.
+ *
+ * Description: Convenient wrapper for kthread_create() followed by
+ * wake_up_process().  Returns the kthread or ERR_PTR(-ENOMEM).
+ */
+#define kthread_run(threadfn, data, namefmt, ...)			   \
+({									   \
+	struct task_struct *__k						   \
+		= kthread_create(threadfn, data, namefmt, ## __VA_ARGS__); \
+	if (!IS_ERR(__k))						   \
+		wake_up_process(__k);					   \
+	__k;								   \
+})
+```
+
+内核线程启动后就一直运行，直到调用 `do_exit()` 或者内核其他部分调用了 `kthread_stop()` 时退出，传递给 `kthread_stop()` 的参数为 `kthread_create()` 返回的 `task_struct` 结构的地址。
+
+```c
+/**
+ * kthread_stop - stop a thread created by kthread_create().
+ * @k: thread created by kthread_create().
+ *
+ * Sets kthread_should_stop() for @k to return true, wakes it, and
+ * waits for it to exit. This can also be called after kthread_create()
+ * instead of calling wake_up_process(): the thread will exit without
+ * calling threadfn().
+ *
+ * If threadfn() may call do_exit() itself, the caller must ensure
+ * task_struct can't go away.
+ *
+ * Returns the result of threadfn(), or %-EINTR if wake_up_process()
+ * was never called.
+ */
+int kthread_stop(struct task_struct *k)
+{
+	struct kthread *kthread;
+	int ret;
+
+	trace_sched_kthread_stop(k);
+	get_task_struct(k);
+
+	kthread = to_kthread(k);
+	barrier(); /* it might have exited */
+	if (k->vfork_done != NULL) {
+		kthread->should_stop = 1;
+		wake_up_process(k);
+		wait_for_completion(&kthread->exited);
+	}
+	ret = k->exit_code;
+
+	put_task_struct(k);
+	trace_sched_kthread_stop_ret(ret);
+
+	return ret;
+}
+```
+
 ## 进程终结
+
+当一个进程终结时，内核必须释放它所占有的资源，并告知父进程。
+
+一般，进程的析构是自身引起的，在调用 `exit()` 时触发。大部分任务都要靠 `do_exit()` 来完成，该函数在 `kernel/exit.c` 中定义。
+
+该函数工作内容如下：
+
+```c
+// TODO
+```
+
