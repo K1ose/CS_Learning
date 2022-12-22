@@ -789,11 +789,135 @@ int kthread_stop(struct task_struct *k)
 
 当一个进程终结时，内核必须释放它所占有的资源，并告知父进程。
 
-一般，进程的析构是自身引起的，在调用 `exit()` 时触发。大部分任务都要靠 `do_exit()` 来完成，该函数在 `kernel/exit.c` 中定义。
+一般，进程的析构是自身引起的，在调用 `exit()` 时触发。大部分任务都要靠 `do_exit()` 来完成，该函数没有返回值，在 `kernel/exit.c` 中定义。
 
-该函数工作内容如下：
+该函数内容如下：
 
 ```c
-// TODO
+NORET_TYPE void do_exit(long code)
+{
+	struct task_struct *tsk = current;
+	int group_dead;
+	
+    /* ... */
+    
+	exit_irq_thread();  /* irq_thread exits */
+
+	exit_signals(tsk);  /* sets PF_EXITING */
+	/*
+	 * tsk->flags are checked in the futex code to protect against
+	 * an exiting task cleaning up the robust pi futexes.
+	 */
+	smp_mb();
+	raw_spin_unlock_wait(&tsk->pi_lock);
+
+	if (unlikely(in_atomic()))
+		printk(KERN_INFO "note: %s[%d] exited with preempt_count %d\n",
+				current->comm, task_pid_nr(current),
+				preempt_count());
+
+	acct_update_integrals(tsk);
+	/* sync mm's RSS info before statistics gathering */
+	if (tsk->mm)
+		sync_mm_rss(tsk, tsk->mm);
+	group_dead = atomic_dec_and_test(&tsk->signal->live);
+	if (group_dead) {
+		hrtimer_cancel(&tsk->signal->real_timer);
+		exit_itimers(tsk->signal);
+		if (tsk->mm)
+			setmax_mm_hiwater_rss(&tsk->signal->maxrss, tsk->mm);
+	}
+	acct_collect(code, group_dead);
+	if (group_dead)
+		tty_audit_exit();
+	if (unlikely(tsk->audit_context))
+		audit_free(tsk);
+
+	tsk->exit_code = code;
+	taskstats_exit(tsk, group_dead);
+
+	exit_mm(tsk);
+
+	if (group_dead)
+		acct_process();
+	trace_sched_process_exit(tsk);
+
+	exit_sem(tsk);
+	exit_files(tsk);
+	exit_fs(tsk);
+	check_stack_usage();
+	exit_thread();
+	cgroup_exit(tsk, 1);
+
+	if (group_dead)
+		disassociate_ctty(1);
+
+	module_put(task_thread_info(tsk)->exec_domain->module);
+
+	proc_exit_connector(tsk);
+
+	/*
+	 * FIXME: do that only when needed, using sched_exit tracepoint
+	 */
+	flush_ptrace_hw_breakpoint(tsk);
+	/*
+	 * Flush inherited counters to the parent - before the parent
+	 * gets woken up by child-exit notifications.
+	 */
+	perf_event_exit_task(tsk);
+
+	exit_notify(tsk, group_dead);
+#ifdef CONFIG_NUMA
+	mpol_put(tsk->mempolicy);
+	tsk->mempolicy = NULL;
+#endif
+#ifdef CONFIG_FUTEX
+	if (unlikely(current->pi_state_cache))
+		kfree(current->pi_state_cache);
+#endif
+	/*
+	 * Make sure we are holding no locks:
+	 */
+	debug_check_no_locks_held(tsk);
+	/*
+	 * We can do this unlocked here. The futex code uses this flag
+	 * just to verify whether the pi state cleanup has been done
+	 * or not. In the worst case it loops once more.
+	 */
+	tsk->flags |= PF_EXITPIDONE;
+
+	if (tsk->io_context)
+		exit_io_context(tsk);
+
+	if (tsk->splice_pipe)
+		__free_pipe_info(tsk->splice_pipe);
+
+	validate_creds_for_do_exit(tsk);
+
+	preempt_disable();
+	exit_rcu();
+	/* causes final put_task_struct in finish_task_switch(). */
+	tsk->state = TASK_DEAD;
+	schedule();
+	BUG();
+	/* Avoid "noreturn function does return".  */
+	for (;;)
+		cpu_relax();	/* For when BUG is null */
+}
 ```
+
+从上述代码中可以分析得到，`do_exit()` 做了以下大致的工作：
+
+- 调用 `exit_signals()` 将 `task_struct` 中的 `flags` 成员设置为 `PF_EXITING`；
+- 调用 `del_timer_sync()` 删除任一内核定时器，根据返回结果确保没有定时器在排队，也没有定时器处理程序在运行；
+- 如果 BSD 的进程记账功能是开启的，则调用 `acct_update_integrals()` 来输出记账信息；
+- 然后调用 `exit_mm()` 函数来释放进程占用的 `mm_struct`，如果没有别的进程使用它们，就将它们彻底释放。
+- 接着调用 `sem__exit()` 函数，如果进程排队等候 IPC 信号，则它将离开队列。
+- 调用 `exit_files()`  和 `eixt_fs()` 函数，分别递减文件描述符和文件系统数据的引用计数。如果某个数值降为零，则代表没有进程在使用相应的资源，此时可以释放。
+- 把存放在 `task_struct` 的 `exit_code` 成员中的任务退出代码置为由 `exit()` 提供的退出代码，或者去完成任何其他由内核机制规定的退出动作。退出代码存放在这里供 父进程随时检索。
+- 调用 `exit_notify()` 向父进程发送信号，给子进程重新寻找养父，养父为线程组中的其他线程或者为 `init` 线程，把进程状态（存放在 `task_struct` 结构的 `exit_state` 中）设成 `EXIT_ZOMBIE` 。
+
+- `do_exit()` 调用 `schedule()` 切换到新的进程，出于 `EXIT_ZOMBIE` 的进程不会再被调度，所以这是程序执行到最后一段代码。
+
+### 删除进程描述符
 
