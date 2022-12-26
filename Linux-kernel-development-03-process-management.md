@@ -982,5 +982,56 @@ static struct task_struct *find_new_reaper(struct task_struct *father)
 }
 ```
 
-`find_new_reaper()` 试图找到进程所在线程组内其他进程，若没有，则返回 `init` 进程。
+`find_new_reaper()` 试图找到进程所在线程组内其他进程，若没有，则返回 `init` 进程作为养父进程。找到养父后，遍历所有子进程为它们设置新的父进程。
+
+```c
+	reaper = find_new_reaper(father);
+
+	list_for_each_entry_safe(p, n, &father->children, sibling) {
+		struct task_struct *t = p;
+		do {
+			t->real_parent = reaper;
+			if (t->parent == father) {
+				BUG_ON(task_ptrace(t));
+				t->parent = t->real_parent;
+			}
+			if (t->pdeath_signal)
+				group_send_sig_info(t->pdeath_signal,
+						    SEND_SIG_NOINFO, t);
+		} while_each_thread(p, t);
+		reparent_leader(father, p, &dead_children);
+	}
+```
+
+接着调用 `ptrace_exit_finish()` 给 `ptraced` 的子进程寻父。
+
+```c
+/*
+ * Detach all tasks we were using ptrace on.
+ */
+void exit_ptrace(struct task_struct *tracer)
+{
+	struct task_struct *p, *n;
+	LIST_HEAD(ptrace_dead);
+
+	write_lock_irq(&tasklist_lock);
+
+	list_for_each_entry_safe(p, n, &tracer->ptraced, ptrace_entry) {
+		if (__ptrace_detach(tracer, p))
+			list_add(&p->ptrace_entry, &ptrace_dead);
+	}
+	write_unlock_irq(&tasklist_lock);
+
+	BUG_ON(!list_empty(&tracer->ptraced));
+
+	list_for_each_entry_safe(p, n, &ptrace_dead, ptrace_entry) {
+		list_del_init(&p->ptrace_entry);
+		release_task(p);
+	}
+}
+```
+
+上述代码遍历了两个链表：子进程链表 和 `ptrace` 子进程链表，给每一个子进程设置新的父进程。当一个进程被 trace 时，他的临时父亲被设置为调试进程。如果调试进程退出了，那么系统会为它和它兄弟寻父。所以一个单独存放被 `ptrace` 跟踪的子进程的链表，可以避免重新遍历找到子进程，从而减小开支。
+
+一旦系统为进程找到并设置了新的父进程，那么就不会再有驻留僵死的进城了。 `init` 进程会例行调用 `wait()` 来检查其子进程，清除所有与其相关的僵死进程。
 
