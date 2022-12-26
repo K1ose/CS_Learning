@@ -921,3 +921,66 @@ NORET_TYPE void do_exit(long code)
 
 ### 删除进程描述符
 
+子进程终结后，系统还保留了它的 `task_struct` ，以便在需要时获取。只有当父进程获得已终结的子进程信息 或者 父进程通知内核自己并不关注这些信息后，子进程的 `task_struct` 才被释放。
+
+最终释放 `task_struct` 时，会调用 `release_task()` 来完成以下工作：
+
+- `release_task() -> __exit_signal() -> _unhash_process() -> detach_pid()` ，从 `pidhash` 上删除该进程，同时也从任务列表中删除该进程；
+- `__exit_signal()` 释放目前僵死进程所使用的的所有剩余资源，进行最终统计、记录；
+
+- 如果这个进程是线程组的最后一个进程，且领头进程已经死掉，那么 `release_task()` 就会通知僵死的领头进程的父进程。
+- `release_task() -> put_task_struct()` 释放进程内核栈和 `thread_info` 结构所占的页，并释放掉 `task_struct` 所占的 `slab` 高速缓存。
+
+至此，进程描述符 task_struct 和 所有进程独享的资源就全部释放掉了。
+
+### 孤儿进程造成的进退维谷
+
+假如父进程在子进程之前退出，那么必须要有机制来保证子进程能找到一个新的养父，否则这些孤儿进程会在退出时永远处于僵死状态，无法释放剩余内存。
+
+解决方法是，在线程组里找一个线程作为父亲。如果不行，就让 `init` 作为父进程。
+
+ `do_exit() -> exit_notify() -> forget_original_parent() -> find_new_reaper()` 进行寻父操作。
+
+```c
+/*
+ * When we die, we re-parent all our children.
+ * Try to give them to another thread in our thread
+ * group, and if no such member exists, give it to
+ * the child reaper process (ie "init") in our pid
+ * space.
+ */
+static struct task_struct *find_new_reaper(struct task_struct *father)
+{
+	struct pid_namespace *pid_ns = task_active_pid_ns(father);
+	struct task_struct *thread;
+
+	thread = father;
+	while_each_thread(father, thread) {
+		if (thread->flags & PF_EXITING)
+			continue;
+		if (unlikely(pid_ns->child_reaper == father))
+			pid_ns->child_reaper = thread;
+		return thread;
+	}
+
+	if (unlikely(pid_ns->child_reaper == father)) {
+		write_unlock_irq(&tasklist_lock);
+		if (unlikely(pid_ns == &init_pid_ns))
+			panic("Attempted to kill init!");
+
+		zap_pid_ns_processes(pid_ns);
+		write_lock_irq(&tasklist_lock);
+		/*
+		 * We can not clear ->child_reaper or leave it alone.
+		 * There may by stealth EXIT_DEAD tasks on ->children,
+		 * forget_original_parent() must move them somewhere.
+		 */
+		pid_ns->child_reaper = init_pid_ns.child_reaper;
+	}
+
+	return pid_ns->child_reaper;
+}
+```
+
+`find_new_reaper()` 试图找到进程所在线程组内其他进程，若没有，则返回 `init` 进程。
+
