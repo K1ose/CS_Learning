@@ -92,3 +92,37 @@ Client进程 和 Server进程 通常运行在不同的主机上。对于主机�
 因特网（Internet）是 互联网络(internet) 中最著名最成功的实现，下图是一个Internet中的CS模型应用程序的基本硬件、软件组织。
 
 <img src="./csapp-11-network-programming\figure_04.jpg" height=350 width=500>
+
+### TCP/IP
+
+每台 Internet 主机都运行实现 TCP/IP 协议 (Transmission Control Protocol / Ineternet Protocol，传输控制协议/互联网络协议) 的软件。其中的客户端和服务器端混合使用 <u>套接字接口函数</u> 和 <u>Unix I/O 函数</u> 来进行通信，通常<u>将套接字函数实现为系统调用</u>，它们陷入内核后调用各种<u>内核模式的 TCP/IP 函数</u>。
+
+TCP/IP 实际上是一个协议族，它们每一个都提供不同的功能。
+
+- <u>IP 协议</u> 提供基本的 <u>命名方法</u> 和 <u>递送机制</u> ，这个递送机制赋予了一台主机向其他主机发送 <u>数据报(datagram)</u> 的能力，但是这个递送机制 **不保证** 数据包在网络中的<u>可靠传输</u>。UDP (Unreliable Datagram Protocol，不可靠数据报协议) 稍微扩展了IP协议，使得包可以<u>在进程间而不是主机间传送</u>。
+- <u>TCP协议</u> 是构建在 IP协议 之上的复杂协议，提供了<u>进程间可靠的全双工连接</u>。
+
+为了简化讨论，将 TCP/IP 看作是一个单独的整体协议，而不讨论 UDP。
+
+### IP地址
+
+将因特网看作一个世界范围的主机集合，它将满足以下特性：
+
+- 主机集合被映射为一组 <u>32位</u> 的IP地址；
+- 这组IP地址被映射位一组称为 <u>因特网域名(Internet domain name)</u> 的标识符；
+
+- 因特网主机上的<u>进程</u>能够通过 <u>连接(connection)</u> 和任何其他因特网主机上的<u>进程</u>通信；
+
+在IPv4中，一个IP地址就是一个32位的无符号整数，网络程序将IP地址存放在如下结构中。
+
+```c
+// code/netp/netpfragments.c
+
+/* IP address structure */
+struct in_addr {
+	uint32_t  s_addr; /* Address in network byte order (big-endian) */
+};
+```
+
+把一个<u>标量地址</u>存放在结构中是<u>套接字接口</u>早期实现的**不幸**产物。
+
