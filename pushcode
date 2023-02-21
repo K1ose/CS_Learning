@@ -1,4 +1,11 @@
-#!/bin/bash
-git add .
-git commit -m "$(date +%F%n%T)"
-git push
+#!/usr/bin/expect
+set timeout 10
+set username "K1ose"
+set password "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\n"
+
+spawn git push
+expect "Username*"
+send "$username\n"
+expect "Password*"
+send "$password\n"
+expect eof

@@ -600,7 +600,7 @@ void show_bytes(byte_pointer start, size_t len)
 
 void show_int(int x)
 {
-    /*  */
+    /* 将 int 类型的数据通过 byte_pointer 这个 unsigned char* 类型的指针转化为自己而序列，并打印输出) */
     show_bytes((byte_pointer)&x, sizeof(int));
 }
 
