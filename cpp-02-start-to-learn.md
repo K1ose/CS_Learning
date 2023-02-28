@@ -10,7 +10,7 @@ categories:
   - cpp
 ---
 
-# cpp_02_start_to_learn
+# 开始学习C++
 
 ## 进入C++
 
