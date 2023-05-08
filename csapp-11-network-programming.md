@@ -124,5 +124,35 @@ struct in_addr {
 };
 ```
 
-把一个<u>标量地址</u>存放在结构中是<u>套接字接口</u>早期实现的**不幸**产物。
+把一个<u>标量地址</u>存放在结构中是<u>套接字接口</u>早期实现的**不幸**产物，如果把IP地址定义为一个<u>标量类型</u>应该更有意义。
+
+由于不同主机可以有不同的<u>主机字节顺序(host byte order)</u>，TCP/IP 为任意整数数据定义了统一的<u>网络字节顺序 (network byte order)</u> （大端字节顺序），例如IP地址。即使主机字节顺序是小端法，IP地址结构中存放的地址总是以<u>大端法</u>顺序存放。Unix 中提供了下面这样的函数在<u>网络和主机字节顺序间</u>实现转换。
+
+```c
+#include <arpa/inet.h>
+uint32_t htonl(uint32_t hostlong);		// host to network long
+uint16_t htons(uint16_t hostshort);		// host to network short
+
+uint32_t ntohl(uint32_t hostlong);		// network to host long
+uint16_t ntohs(uint16_t hostshort);		// network to host short
+```
+
+需要注意的是Unix中没有对应的处理64位值的函数。
+
+IP地址通常以点分十进制表示法来表示，如 `128.2.194.242` 就是地址 `0x8002c2f2` 的点分十进制表示。在 Linux 中用 `hostname` 命令在查看点分十进制地址。
+
+```bash
+$ hostname -i
+127.0.1.1
+```
+
+应用程序使用 `inet_pton` 和 `inet_ntop` 函数来实现 IP地址 和 点分十进制串 的转换。
+
+```c
+#include <arpa/inet.h>
+int inet_pton(AF_INET, const char *src, void *dst);	// 成功返回 1， 出错返回 -1 ，src位非法点分十进制则返回 0
+const char *inet_ntop(AF_INET, const void *src, char *dst, socklen_t size);	// 成功返回指向点分十进制字符串的指针，出错返回NULL
+```
+
+这里的 `AF_INET` 指的是 IPv4 地址，如果是 `AF_INET6` 指的是 IPv6 地址。
 
