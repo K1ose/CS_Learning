@@ -13,7 +13,7 @@ categories:
 
 # 概览
 
-使用QtDesigner结合PySide的编程方法。主要分为三个步骤：
+使用QtDesigner结合PySide2的编程方法。主要分为三个步骤：
 
 1. 打开QtDesigner绘制窗口；
 2. 将UI文件转换为py文件供主程序调用；
@@ -25,16 +25,16 @@ categories:
 
 - QTDesigner:
   - Name: QTDesigner
-  - Program: D:\K1ose\code\pandaHomework\venv\Lib\site-packages\PySide2\designer.exe
+  - Program: 【项目环境地址】\Lib\site-packages\PySide2\designer.exe
   - Working directory: \$ProjectFileDir$
 - ui2py:
   - Name: ui2py
-  - Program: D:\K1ose\code\pandaHomework\venv\Scripts\pyside2-rcc.exe
+  - Program: 【项目环境地址】\Scripts\pyside2-rcc.exe
   - Arguments: \$FileName\$ -o \$FileNameWithoutExtension$_rc.py
   - Working directory: \$FileDir$
 - qrc2py:
   - Name: qrc2py
-  - Program: D:\K1ose\code\pandaHomework\venv\Scripts\pyside2-uic.exe
+  - Program: 【项目环境地址】\venv\Scripts\pyside2-uic.exe
   - Arguments: -o \$FileNameWithoutExtension\$_ui.py \$FileName$
   - Working directory: \$FileDir$
 
