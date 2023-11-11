@@ -599,3 +599,200 @@ Ideally, you should strive for strict visibility of properties and methods, so d
 | `protected`  | ✔                            | ✔                          | 𝗫                             | 𝗫                             |
 | `internal`   | ✔                            | ✔                          | ✔                             | 𝗫                             |
 | `public`     | ✔                            | ✔                          | ✔                             | ✔                             |
+
+#### Define property delegates
+
+You learned in the previous section that properties in Kotlin use a *backing field* to hold their values in memory. You use the `field` identifier to reference it.
+
+When you look at the code so far, you can see the duplicated code to check whether the values are within range for the `speakerVolume`, `channelNumber`, and `brightnessLevel` properties in the `SmartTvDevice` and `SmartLightDevice` classes. You can reuse the range-check code in the setter function with *delegates*. Instead of using a field, and a getter and setter function to manage the value, the delegate manages it.
+
+The syntax to create property delegates starts with the declaration of a variable followed by the `by` keyword, and the delegate object that handles the getter and setter functions for the property. 
+
+```kotlin
+var <name> by <delegate object>
+```
+
+Before you implement the class to which you can delegate the implementation, you need to be familiar with *interfaces*. An interface is a contract to which classes that implement it need to adhere. It focuses on *what to do* instead of *how to do* the action. In short, an interface helps you achieve *abstraction*.
+
+For example, before you build a house, you inform the architect about what you want. You want a bedroom, kid's room, living room, kitchen,  and a couple of bathrooms. In short, you specify *what you want* and the architect specifies *how to achieve it*.
+
+```kotlin
+interface <Name> {
+	<body>
+}
+```
+
+You already learned how to *extend* a class and *override* its functionality. With interfaces, the class *implements* the interface. The class provides implementation details for the  methods and properties declared in the interface. You'll do something  similar with the  [`ReadWriteProperty`](https://kotlinlang.org/api/latest/jvm/stdlib/kotlin.properties/-read-write-property/) interface to create the delegate. You learn more about interfaces in the next unit.
+
+To create the delegate class for the `var` type, you need to implement the  [`ReadWriteProperty`](https://kotlinlang.org/api/latest/jvm/stdlib/kotlin.properties/-read-write-property/) interface. Similarly, you need to implement the  [`ReadOnlyProperty`](https://kotlinlang.org/api/latest/jvm/stdlib/kotlin.properties/-read-only-property/) interface for the `val` type.
+
+Create the delegate for the `var` type:
+
+1. Before the `main()` function, create a `RangeRegulator` class that implements the `ReadWriteProperty<Any?,` `Int>` interface:
+
+```kotlin
+class RangeRegulator() : ReadWriteProperty<Any?, Int> {
+
+}
+
+fun main() {
+    ...
+}
+```
+
+Don't worry about the angle brackets or the content inside them. They represent generic types and you learn about them in the next unit.
+
+2. In the `RangeRegulator` class's primary constructor, add an `initialValue`  parameter, a private `minValue` property, and a private `maxValue` property, all of `Int` type:
+
+```kotlin
+class RangeRegulator(
+    initialValue: Int,
+    private val minValue: Int,
+    private val maxValue: Int
+) : ReadWriteProperty<Any?, Int> {
+
+}
+```
+
+3. In the `RangeRegulator` class's body, override the `getValue()` and `setValue()` methods:
+
+```kotlin
+class RangeRegulator(
+    initialValue: Int,
+    private val minValue: Int,
+    private val maxValue: Int
+) : ReadWriteProperty<Any?, Int> {
+
+    override fun getValue(thisRef: Any?, property: KProperty<*>): Int {
+    }
+
+    override fun setValue(thisRef: Any?, property: KProperty<*>, value: Int) {
+    }
+}
+```
+
+These methods act as the properties' getter and setter functions.
+
+4. On the line before the `SmartDevice` class, import the `ReadWriteProperty` and `KProperty` interfaces:
+
+```kotlin
+import kotlin.properties.ReadWriteProperty
+import kotlin.reflect.KProperty
+
+open class SmartDevice(val name: String, val category: String) {
+    ...
+}
+
+...
+
+class RangeRegulator(
+    initialValue: Int,
+    private val minValue: Int,
+    private val maxValue: Int
+) : ReadWriteProperty<Any?, Int> {
+
+    override fun getValue(thisRef: Any?, property: KProperty<*>): Int {
+    }
+
+    override fun setValue(thisRef: Any?, property: KProperty<*>, value: Int) {
+    }
+}
+
+...
+```
+
+5. In the `RangeRegulator` class, on the line before the `getValue()` method, define a `fieldData` property and initialize it with `initialValue` parameter:
+
+```kotlin
+class RangeRegulator(
+    initialValue: Int,
+    private val minValue: Int,
+    private val maxValue: Int
+) : ReadWriteProperty<Any?, Int> {
+
+    var fieldData = initialValue
+
+    override fun getValue(thisRef: Any?, property: KProperty<*>): Int {
+    }
+
+    override fun setValue(thisRef: Any?, property: KProperty<*>, value: Int) {
+    }
+}
+```
+
+This property acts as the *backing field* for the variable.
+
+6. In the `getValue()` method's body, return the `fieldData` property:
+
+```kotlin
+class RangeRegulator(
+    initialValue: Int,
+    private val minValue: Int,
+    private val maxValue: Int
+) : ReadWriteProperty<Any?, Int> {
+
+    var fieldData = initialValue
+
+    override fun getValue(thisRef: Any?, property: KProperty<*>): Int {
+        return fieldData
+    }
+
+    override fun setValue(thisRef: Any?, property: KProperty<*>, value: Int) {
+    }
+}
+```
+
+7. In the `setValue()` method's body, check whether the `value` parameter being assigned is in the `minValue..maxValue` range before you assign it to the `fieldData` property:
+
+```kotlin
+class RangeRegulator(
+    initialValue: Int,
+    private val minValue: Int,
+    private val maxValue: Int
+) : ReadWriteProperty<Any?, Int> {
+
+    var fieldData = initialValue
+
+    override fun getValue(thisRef: Any?, property: KProperty<*>): Int {
+        return fieldData
+    }
+
+    override fun setValue(thisRef: Any?, property: KProperty<*>, value: Int) {
+        if (value in minValue..maxValue) {
+            fieldData = value
+        }
+    }
+}
+```
+
+8. In the `SmartTvDevice` class, use the delegate class to define the `speakerVolume` and `channelNumber` properties:
+
+```kotlin
+class SmartTvDevice(deviceName: String, deviceCategory: String) :
+    SmartDevice(name = deviceName, category = deviceCategory) {
+
+    override val deviceType = "Smart TV"
+
+    private var speakerVolume by RangeRegulator(initialValue = 2, minValue = 0, maxValue = 100)
+
+    private var channelNumber by RangeRegulator(initialValue = 1, minValue = 0, maxValue = 200)
+
+    ...
+
+}
+```
+
+9. In the `SmartLightDevice` class, use the delegate class to define the `brightnessLevel` property:
+
+```kotlin
+class SmartLightDevice(deviceName: String, deviceCategory: String) :
+    SmartDevice(name = deviceName, category = deviceCategory) {
+
+    override val deviceType = "Smart Light"
+
+    private var brightnessLevel by RangeRegulator(initialValue = 0, minValue = 0, maxValue = 100)
+
+    ...
+
+}
+```
