@@ -83,14 +83,23 @@ Go语言的面向对象机制与一般语言不同。它没有类层次结构，
 
 书中所有的代码都可以从 [http://gopl.io](http://gopl.io/) 上的Git仓库下载。go get命令根据每个例子的导入路径智能地获取、构建并安装。只需要选择一个目录作为工作空间，然后将GOPATH环境变量设置为该路径。
 
+### 语言环境
+
 必要时，Go语言工具会创建目录。例如：
 
 ```bash
-$ export GOPATH=$HOME/gobook    # 选择工作目录
-$ go get gopl.io/ch1/helloworld # 获取/编译/安装
-$ $GOPATH/bin/helloworld        # 运行程序
-Hello, 世界                     # 这是中文
+$ export GOPATH=[GOPATH]    # 选择工作目录
+$ export GOROOT=[GOROOT]	# Go安装的目录
 ```
+
+在Windows中，还需要在【环境变量】中添加：
+
+- 【用户变量】：
+  - 添加 `key=GOPATH，value= <Go project directory>`
+  - 修改 `key=Path，value中添加或修改为%GOPATH%\bin`
+- 【系统变量】：
+  - 添加 `key=GOPATH，value=<Go project directory>`
+  - 添加 `key=GOROOT，value=<Go install directory>`
 
 运行这些例子需要安装Go1.5以上的版本。
 
@@ -100,6 +109,88 @@ go version go1.5 linux/amd64
 ```
 
 如果使用其他的操作系统, 请参考 https://golang.org/doc/install 提供的说明安装
+
+### 编程环境
+
+这里使用 VS Code，先把 GOPATH 的目录添加到 VS Code 的工作目录。
+
+安装 Go 插件，然后使用 Ctrl + Shift + P 快捷键来打开命令窗口，搜索 Go: Install/update Tools，然后全选安装所有工具，安装完成后会在目录下生成两个文件夹，里面有对应工具所使用到的 包(pkg) 和 可执行程序(bin)。
+
+新建目录 `src` ，进入。
+
+使用 `go mod init <module name>` 来生成一个模块。例如：
+
+```bash
+go mod init gopl
+```
+
+在 `src` 中，生成 `go.mod` 文件，内容如下：
+
+```
+module gopl
+
+go 1.21.3
+```
+
+在 `src` 目录中，新建一个 `main.go` 文件，作为程序的入口。
+
+可以新建目录，每个目录下所新建的 `go` 文件，引用为以其目录名为包名。如图，`hello` 目录与 `main.go` 文件位于同一目录。
+
+![](./Go-programming-01-preface\figure_02.jpg)
+
+`hello_1_1.go` 文件的内容如下：
+
+```go
+package hello
+
+import (
+	"fmt"
+)
+
+func SayHello() {
+	fmt.Println("Hello, World!")
+}
+```
+
+可以使用以下命令进行编译或直接执行：
+
+```bash
+$ go run main.go			# 直接运行
+$ go build main.go			# 编译
+$ .\main.exe				# Windows 下执行
+```
+
+### 调试环境
+
+在 GOPATH 下新建一个 `.vscode` 目录，并新建文件 `launch.json` ，内容如下：
+
+```json
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Go debug",
+            "type": "go",
+            "request": "launch",
+            "mode": "auto",
+            "program": "${fileDirname}",		// open file, should be main.go
+            "env": {
+                "GOPATH": "D:/coding/go",
+                "GOROOT": "D:/Go"
+            },
+            "args": [
+                // "test"
+            ],
+            // "showLog": true
+        }
+    ]
+}
+```
+
+这样下断点、 F5 后，就可以调试了。
 
 ## 辅助文档
 

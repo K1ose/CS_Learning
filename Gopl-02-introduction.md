@@ -20,6 +20,7 @@ categories:
 执行：
 
 ```
+mkdir gopl
 go mod init gopl
 ```
 
@@ -312,7 +313,11 @@ func echo1_3_3() {
 
 对文件做拷贝、打印、搜索、排序、统计或类似事情的程序都有一个差不多的程序结构：一个处理输入的循环，在每个元素上执行计算处理，在处理的同时或最后产生输出。我们会展示一个名为`dup`的程序的三个版本；灵感来自于Unix的`uniq`命令，其寻找相邻的重复行。该程序使用的结构和包是个参考范例，可以方便地修改。
 
+现在，在 `main.go` 同一目录下新建
+
 `dup`的第一个版本打印标准输入中多次出现的行，以重复次数开头。该程序将引入`if`语句，`map`数据类型以及`bufio`包。
+
+*<u>dup1.go</u>*
 
 ```go
 package main
@@ -353,4 +358,66 @@ counts[line] = counts[line] + 1
 
 `map`中不含某个键时不用担心，首次读到新行时，等号右边的表达式`counts[line]`的值将被计算为其类型的零值，对于int`即0。
 
-为了打印结果，我们使用了基于`range`的循环，并在`counts`这个`map`上迭代。跟之前类似，每次迭代得到两个结果，键和其在`map`中对应的值。`map`的迭代顺序并不确定，从实践来看，该顺序随机，每次运行都会变化。这种设计是有意为之的，因为能防止程序依赖特定遍历顺序，而这是无法保证的。
+为了打印结果，我们使用了基于 `range` 的循环，并在 `counts` 这个 `map` 上迭代。跟之前类似，每次迭代得到两个结果，键和其在`map`中对应的值。`map`的迭代顺序并不确定，从实践来看，该顺序随机，每次运行都会变化。这种设计是有意为之的，因为能防止程序依赖特定遍历顺序，而这是无法保证的。
+
+继续来看 `bufio` 包，它使处理输入和输出方便又高效。
+
+`Scanner` 类型是该包最有⽤的特性之⼀，它读取输⼊并将其拆成行或单词；通常是处理⾏形式的输⼊最简单的⽅法。
+
+程序使⽤短变量声明创建 `bufio.Scanner` 类型的变量 `input` 。
+
+```go
+input := bufio.NewScanner(os.Stdin)
+```
+
+该变量从程序的标准输入中读取内容，每次调用 `input.Scanner` ，即读入下一行，并移除行末的换行符，读取的内容可以用 `input.Text()` 得到。 `scan` 函数在读到一行时返回 `true` ，在无输入时返回 `false` 。 
+
+对于格式化输出，`Printf` 里的转换在 `Go` 中被称为 verb 。
+
+```
+%d 			⼗进制整数
+%x, %o, %b 	⼗六进制，⼋进制，⼆进制整数。
+%f, %g, %e 	浮点数： 3.141593 3.141592653589793 3.141593e+00
+%t 			布尔：true或false
+%c 			字符（rune） (Unicode码点)
+%s 			字符串
+%q 			带双引号的字符串"abc"或带单引号的字符'c'
+%v 			变量的⾃然形式（natural format）
+%T 			变量的类型
+%% 			字⾯上的百分号标志（⽆操作数）
+```
+
+dup的另一个版本，从文件中读取每行数据，计算重复行。
+
+```
+func Dup2() {
+	counts := make(map[string]int)
+	files := os.Args[1]
+	if len(files) == 0 {
+		countLines(os.Stdin, counts)
+	} else {
+		for _, arg := range files {
+			f, err := os.Open(arg)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "dup2: %v\n", err)
+				continue
+			}
+			countLines(f, counts)
+			f.Close()
+		}
+	}
+	for line, n := range counts {
+		if n > 1 {
+			fmt.Printf("%d\t%s\n", n, line)
+		}
+	}
+}
+
+func countLines(f *os.File, counts map[string]int) {
+	input := bufio.NewScanner(f)
+	for input.Scan() {
+		counts[input.Text()]++
+	}
+}
+```
+
