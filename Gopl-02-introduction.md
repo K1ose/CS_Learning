@@ -8,10 +8,10 @@ tags:
 categories:
   - study
   - book
-  - The Go Programming Language
+  - The Go Programming Language 
 ---
 
-# 入门
+# 第一章 入门
 
 先扯一下go mod的问题。
 
@@ -389,7 +389,7 @@ input := bufio.NewScanner(os.Stdin)
 
 dup的另一个版本，从文件中读取每行数据，计算重复行。
 
-```
+```go
 func Dup2() {
 	counts := make(map[string]int)
 	files := os.Args[1]
@@ -419,5 +419,450 @@ func countLines(f *os.File, counts map[string]int) {
 		counts[input.Text()]++
 	}
 }
+```
+
+`countLines` 允许读入文件每行数据。
+
+接着还有一个先整体读入为字符串，然后通过关键字 `\n` 来进行split的方法。
+
+```go
+func Dup3() {
+	counts := make(map[string]int)
+	files := os.Args[1:]
+	for _, file := range files {
+		data, err := os.ReadFile(file)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "dup3: %v\n", err)
+			continue
+		}
+
+		// read and split it by "\n"
+		for _, line := range strings.Split(string(data), "\n") {
+			counts[line]++
+		}
+	}
+	for line, n := range counts {
+		if n > 1 {
+			fmt.Printf("%d\t%s\n", n, line)
+		}
+	}
+}
+```
+
+最后，完成练习1-4：修改 `dup1` ，当出现重复行的时候打印文件名称。
+
+```go
+func Dup_p1() {
+	counts := make(map[string]int)
+	files := os.Args[1:]
+	if len(files) == 0 {
+		countAndPrintFilename(os.Stdin, counts)
+	} else {
+		for _, arg := range files {
+			f, err := os.Open(arg)
+			if err != nil { // catch exception
+				fmt.Fprintf(os.Stderr, "dup2: %v\n", err)
+				continue
+			}
+			countAndPrintFilename(f, counts)
+			f.Close()
+		}
+	}
+}
+
+func countAndPrintFilename(f *os.File, counts map[string]int) {
+	// read every lines
+	input := bufio.NewScanner(f)
+	for input.Scan() {
+		counts[input.Text()]++
+		if counts[input.Text()] > 1 {
+			fmt.Println(f.Name())
+		}
+	}
+}
+```
+
+## GIF动画
+
+有问题，跳过。
+
+## 获取URL
+
+为了最简单地展示基于HTTP获取信息的方式，下面给出一个示例程序 `fetch` ，该程序将获取对应的 url， 并将其源文本打印出来。其灵感来源于 curl 。
+
+```go
+package url
+
+import (
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+)
+
+func Url1() {
+	// get url by Command-Line arguments
+	for _, url := range os.Args[1:] {
+		res, err := http.Get(url)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "fetch: %v\n", err)
+			os.Exit(1)
+		}
+		b, err := io.ReadAll(res.Body)
+		res.Body.Close()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "fetch: reading %s: %v\n", url, err)
+			os.Exit(1)
+		}
+		fmt.Printf("%s", b)
+	}
+}
+```
+
+`io.ReadAll()` 从 res 中读取全部内容，而 `res.Body` 字段包括一个可读的服务器响应流。
+
+执行：
+
+```
+$ go build main.go
+$ .\main.exe https://www.baidu.com
+<!--STATUS OK--><html> <head><meta http-equiv=content-type content=text/html;charset=utf-8><meta http-equiv=X-UA-Compatible content=IE=Edge><meta content=always name=referrer><link rel=stylesheet type=text/css href=https://ss1.bdstatic.com/5eN1bjq8AAUYm2zgoY3K/r/www/cache/bdorz/baidu.min.css><title>百度一下，你就知道</title></head>
+...
+```
+
+现在开始练习：
+
+*Exercise 1.7*
+
+```go
+func Url_p1() {
+	for _, url := range os.Args[1:] {
+		res, err := http.Get(url)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "fetch (exercise): %v\n", err)
+			os.Exit(1)
+		}
+		_, err = io.Copy(os.Stdout, res.Body)
+		res.Body.Close()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "fetch (exercise) %s: %v\n", url, err)
+			os.Exit(1)
+		}
+	}
+}
+```
+
+*Exercise 1.8*
+
+```go
+func Url_p2() {
+	for _, url := range os.Args[1:] {
+		if !strings.HasPrefix(url, "http://") {
+			url = "http://" + url
+		}
+		res, err := http.Get(url)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "fetch (exercise): %v\n", err)
+			os.Exit(1)
+		}
+		_, err = io.Copy(os.Stdout, res.Body)
+		res.Body.Close()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "fetch (exercise) %s: %v\n", url, err)
+			os.Exit(1)
+		}
+	}
+}
+```
+
+*Exercise 1.9*
+
+```go
+func Url_p3() {
+	for _, url := range os.Args[1:] {
+		if !strings.HasPrefix(url, "http://") {
+			url = "http://" + url
+		}
+		res, err := http.Get(url)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "fetch (exercise): %v\n", err)
+			os.Exit(1)
+		}
+		_, err = io.Copy(os.Stdout, res.Body)
+		res.Body.Close()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "fetch (exercise) %s: %v", url, err)
+			os.Exit(1)
+		}
+		_, err = io.WriteString(os.Stdout, res.Status)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "fetch (exercise) %s: %v", url, err)
+			os.Exit(1)
+		}
+	}
+}
+```
+
+## 并发获取URL
+
+```go
+package urls
+
+import (
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"time"
+)
+
+func Urls1() {
+	start := time.Now()
+	ch := make(chan string)
+	for _, url := range os.Args[1:] {
+		go fetch(url, ch) // start a goroutine
+	}
+
+	for range os.Args[1:] {		// print channel data
+		fmt.Println(<-ch)
+	}
+
+	fmt.Printf("%.2fs elapsed\n", time.Since(start).Seconds())
+}
+
+func fetch(url string, ch chan<- string) {
+	start := time.Now()
+	res, err := http.Get(url)
+	if err != nil {
+		ch <- fmt.Sprint(err) // send to channel ch
+		return
+	}
+
+	nbytes, err := io.Copy(io.Discard, res.Body)
+	res.Body.Close() // do not leak resources
+	if err != nil {
+		ch <- fmt.Sprintf("while reading %s: %v", url, err)
+		return
+	}
+
+	secs := time.Since(start).Seconds()
+	ch <- fmt.Sprintf("%.2fs  %7d  %s", secs, nbytes, url)
+} 
+```
+
+`goroutine` 是一种函数的并发执行方式，而 `channel` 用来在 `goroutine` 之间进行参数传递。
+
+`Urls1` 函数本身也运行在一个`goroutine` 中，而 `go` 则表示创建一个新的 `goroutine` 。
+
+`Urls1` 函数中用 `make` 函数创建了一个传递 `string` 类型参数的 `channel` ，对每个命令行参数，我们都用 `go` 关键字来创建一个 `goroutine` ，并且让函数在这个 `goroutine` 中一步执行 `http.Get()` 方法。这个程序的`io.Copy` 会把响应的 `Body` 内容拷贝到 `io.Discard` 输出流中。可以把这个变量看作一个垃圾桶，向里面写一些不想要的内容。每当请求返回内容时，`fetch` 函数会往 `ch` 这个 `channel` 里 写入一个字符串，由 `Urls1` 函数力度的第二个 `for` 循环来处理并打印出来。
+
+当一个 `goroutine` 尝试在一个 `channel` 上做 `send` 或者 `receive` 操作时，这个 `goroutine` 会阻塞在调用处，直到另一个 `goroutine` 往这个 `channel` 里写入或接受数据时，这两个 `goroutine` 才会继续执行 `channel` 操作之后的逻辑。在这个例子中，每一个 `fetch` 函数在执行时都会往 `channel` 里发送一个值 (`ch <- expression`)。这个程序中，我们用 `Urls1` 函数来接收所有 `fetch` 函数传回的字符串，可以避免在 `goroutine` 异步执行还没有完成时，`Urls1` 就提前退出。
+
+*Exercise 1.10*
+
+```go
+package urls
+
+import (
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"time"
+)
+
+func UrlsExercise_p1() {
+	start := time.Now()
+	ch := make(chan string)
+	for _, url := range os.Args[1:] {
+		go fetchExercise(url, ch) // start a goroutine
+	}
+
+	for range os.Args[1:] {
+		fmt.Println(<-ch)
+	}
+
+	fmt.Printf("%.2fs elapsed\n", time.Since(start).Seconds())
+}
+
+func fetchExercise(url string, ch chan<- string) {
+	start := time.Now()
+	res, err := http.Get(url)
+	if err != nil {
+		ch <- fmt.Sprint(err) // send to channel ch
+		return
+	}
+
+	_, err = io.Copy(os.Stdout, res.Body)
+	res.Body.Close() // do not leak resources
+	if err != nil {
+		ch <- fmt.Sprintf("while reading %s: %v", url, err)
+		return
+	}
+
+	secs := time.Since(start).Seconds()
+	ch <- fmt.Sprintf("%.2fs %s", secs, url)
+}
+
+```
+
+## Web服务
+
+```go
+// web_server.go
+package server
+
+import (
+	"fmt"
+	"log"
+	"net/http"
+)
+
+func WebServer1() {
+	http.HandleFunc("/", handler)
+	log.Fatal(http.ListenAndServe("localhost:8000", nil))
+}
+
+func handler(w http.ResponseWriter, r *http.Request) {
+	fmt.Fprintf(w, "URL.Path = %q\n", r.URL.Path)
+}
+```
+
+我们只用了几行代码就实现了一个Web服务程序。 `WebServer1()` 函数将所有发送到 `/` 路径下的请求和 `handler` 函数关联起来，`/` 开头的请求其实就是所有发送到当前站点的请求，服务监听 `8000` 端口。发到这个服务的“请求”是一个 `http.Request` 类型的对象，其内部包含了一系列相关字段，包括我们需要的URL。
+
+当请求到达服务器时，这个请求会被传入 `handler` 进行处理，这个函数会将 `/hello` 这个路径从请求的UL中解析出来，然后发到响应中。
+
+现在执行以下命令，在 Windos 下跑起web服务：
+
+```bash
+$ go run ..../main.go # use & to run in the background.
+```
+
+访问 `localhost:8000` 就可以看到 `URL.Path = "/"` ，也可以用之前写的 fetch 程序去获取。
+
+在这个服务的基础上叠加特性是很容易的，一种实用的修改是为访问的url添加某种状态，比如，对请求的次数进行统计、对URL的请求结果会包含各种URL被访问的总次数，直接对`/count` 的访问除外。
+
+```go
+package server
+
+import (
+	"fmt"
+	"log"
+	"net/http"
+	"sync"
+)
+
+var mu sync.Mutex
+var count int
+
+func WebServer2() {
+	http.HandleFunc("/", handlerRoot)
+	http.HandleFunc("/count", counter)
+	log.Fatal(http.ListenAndServe("localhost:8000", nil))
+}
+
+func handlerRoot(w http.ResponseWriter, r *http.Request) {
+	mu.Lock()
+	count++
+	mu.Unlock()
+	fmt.Fprintf(w, "URL.Path = %q\n", r.URL.Path)
+}
+
+func counter(w http.ResponseWriter, r *http.Request) {
+	mu.Lock()
+	fmt.Fprintf(w, "Count %d\n", count)
+	mu.Unlock()
+}
+```
+
+这个服务器有两个请求处理函数，根据请求的url不同会调用不同的函数：
+
+- 对 `/count` 这个 url 的请求，会调用到 `counter()` 函数。
+- 如果请求 `pattern` 是以 `/` 结尾，那么所有以该 url 为前缀的 url 都会被匹配默认的处理函数 `handlerRoot()`。
+
+服务器每次接收到请求处理时都会另起一个 `goroutine` ，这样服务器就可以在同一个时间处理多个请求。然而在并发的情况下，加入真的有两个请求同一时刻去更新 `count`  ，那么这个值可能不会被正确地增加，从而引发“条件竞争”的问题。
+
+为了保证每次修改变量的时候最多只能有一个 `goroutine` ，使用 `mu.Lock()` 和 `mu.Unlock()` 函数来将修改 `count` 的所有行为包含在中间。
+
+下面用一个更加鲜明的例子，处理函数将打印请求的http头和请求的form数据。
+
+```go
+package server
+
+import (
+	"fmt"
+	"log"
+	"net/http"
+)
+
+func WebServer3() {
+	http.HandleFunc("/", handleRoot)
+	log.Fatal(http.ListenAndServe("localhost:8000", nil))
+}
+
+func handleRoot(w http.ResponseWriter, r *http.Request) {
+	fmt.Fprintf(w, "%s %s %s\n", r.Method, r.URL, r.Proto)
+	for k, v := range r.Header {
+		fmt.Fprintf(w, "Header[%q] = %q\n", k, v)
+	}
+
+	fmt.Fprintf(w, "Host = %q\n", r.Host)
+	fmt.Fprintf(w, "RemoteAddr = %q\n", r.RemoteAddr)
+	if err := r.ParseForm(); err != nil {
+		log.Print(err)
+	}
+	for k, v := range r.Form {
+		fmt.Fprintf(w, "Form[%q] = %q\n", k, v)
+	}
+}
+```
+
+可以得到下面的结果：
+
+![](./Gopl-02-introduction\print_head.jpg)
+
+可以看到，变量定义和条件判断北方到了一起，这样结合可以限制 `err` 这个变量的作用域。
+
+```go
+if err := r.ParseForm(); err != nil {
+		log.Print(err)
+	}
+```
+
+在这些程序中，有很多不同类型被输出到了标准输出流中：
+
+- 在 fetch URL 时，我们把 HTTP 相应数据拷贝到了 `os.Stdout` ；
+- 在 gif 章节，我们输出了一个文件。；
+- 在 fetchall 的时候则完全忽略了 `http.Body` ，转而只计算 `Body` 的大小， 把 `Body` 拷贝到了 `io.Discard` 中；
+- 在 server 中，我们使用 `fmt.Fprintf` 直接写到了 `http.ResponseWriter` 中；
+
+尽管这几种实现流程不一样，但是都实现了一个共同的借口—— `io.Writer` 。
+
+现在我们实现在web页面显示1.4的动画：
+
+```go
+package server
+
+import (
+	gif "gopl/ch1/1.4_gif"
+	"log"
+	"net/http"
+)
+
+func WebServer4() {
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		gif.Lissajous(w)
+	})
+	log.Fatal(http.ListenAndServe("localhost:8000", nil))
+}
+
+```
+
+![](./Gopl-02-introduction\lissajous.jpg)
+
+*exercise 1.12*
+
+```
+
 ```
 

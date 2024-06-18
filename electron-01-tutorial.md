@@ -322,3 +322,22 @@ Electron 的主进程是一个拥有着完全操作系统访问权限的 Node.js
 
 ### 使用预加载脚本增强渲染器
 
+BrowserWindow 的预加载脚本运行在具有 HTML DOM 和 Node.js、Electron API 的有限子集访问权限的环境中。
+
+>  **info 预加载脚本沙盒化**
+>
+> 从 Electron 20 开始，预加载脚本默认 **沙盒化** ，不再拥有完整 Node.js 环境的访问权。 实际上，这意味着你只拥有一个 polyfilled 的 `require` 函数，这个函数只能访问一组有限的 API。
+>
+> | 可用的 API            | 详细信息                                                     |
+> | --------------------- | ------------------------------------------------------------ |
+> | Electron 模块         | 渲染进程模块                                                 |
+> | Node.js 模块          | [`events`](https://nodejs.org/api/events.html)、[`timers`](https://nodejs.org/api/timers.html)、[`url`](https://nodejs.org/api/url.html) |
+> | Polyfilled 的全局模块 | [`Buffer`](https://nodejs.org/api/buffer.html)、[`process`](https://www.electronjs.org/zh/docs/latest/api/process)、[`clearImmediate`](https://nodejs.org/api/timers.html#timers_clearimmediate_immediate)、[`setImmediate`](https://nodejs.org/api/timers.html#timers_setimmediate_callback_args) |
+>
+> 有关详细信息，请阅读 [沙盒进程](https://www.electronjs.org/zh/docs/latest/tutorial/sandbox) 教程。
+
+与 Chrome 扩展的[内容脚本](https://developer.chrome.com/docs/extensions/mv3/content_scripts/)（Content Script）类似，预加载脚本在渲染器加载网页之前注入。 如果你想为渲染器添加需要特殊权限的功能，可以通过 [contextBridge](https://www.electronjs.org/zh/docs/latest/api/context-bridge) 接口定义 [全局对象](https://developer.mozilla.org/en-US/docs/Glossary/Global_object)。
+
+为了演示这一概念，你将会创建一个将应用中的 Chrome、Node、Electron 版本号暴露至渲染器的预加载脚本
+
+新建一个 `preload.js` 文件。该脚本通过 `versions` 这一全局变量，将 Electron 的 `process.versions` 对象暴露给渲染器。

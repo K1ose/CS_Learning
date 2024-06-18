@@ -12,6 +12,10 @@ categories:
 
 # preparelab
 
+## url
+
+https://csapp.cs.cmu.edu/3e/labs.html
+
 ## docker
 
 使用`docker`挂载目录，实现宿主机与镜像的数据同步；
